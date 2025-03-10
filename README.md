@@ -50,7 +50,7 @@ pip install uv
 
 1. 克隆项目：
 ```bash
-git clone [https://github.com/chenyeju295/mcp_generate_images.git]
+git clone https://github.com/chenyeju295/mcp_generate_images.git
 
 ```
 
