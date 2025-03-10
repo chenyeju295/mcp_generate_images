@@ -14,15 +14,19 @@
 ## 环境准备
 
 ### 1. Python 环境
-- Python 3.8+ 
+
+- Python 3.10+ 
+- 下载地址： https://www.python.org/downloads/
+
 - 推荐使用 pyenv 管理 Python 版本：
 ```bash
 # macOS 安装 pyenv
 brew install pyenv
 
 # 安装 Python
-pyenv install 3.8.10
-pyenv global 3.8.10
+pyenv install 3.13.2
+pyenv global 3.13.2
+
 ```
 - Nodejs 环境
 
