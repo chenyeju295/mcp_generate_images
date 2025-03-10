@@ -14,16 +14,23 @@
 ## 环境准备
 
 ### 1. Python 环境
-- Python 3.8+ 
+
+- Python 3.10+ 
+- 下载地址： https://www.python.org/downloads/
+
 - 推荐使用 pyenv 管理 Python 版本：
 ```bash
 # macOS 安装 pyenv
 brew install pyenv
 
 # 安装 Python
-pyenv install 3.8.10
-pyenv global 3.8.10
+pyenv install 3.13.2
+pyenv global 3.13.2
+
 ```
+- Nodejs 环境
+
+- 下载地址： https://nodejs.org/zh-cn  
 
 ### 2. uv 包管理工具
 uv 是一个快速的 Python 包管理器，需要先安装：
@@ -50,7 +57,7 @@ pip install uv
 
 1. 克隆项目：
 ```bash
-git clone https://github.com/chenyeju295/mcp_generate_images.git
+git clone [https://github.com/chenyeju295/mcp_generate_images.git]
 
 ```
 
