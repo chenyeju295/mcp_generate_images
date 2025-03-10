@@ -63,9 +63,12 @@ git clone [https://github.com/chenyeju295/mcp_generate_images.git]
 
 2. 安装依赖：
 ```bash
-uv pip install fastmcp requests
+python3 -m pip install fastmcp requests
 ```
-
+出现证书问题可以使用：
+```bash
+python3 -m pip install fastmcp requests --trusted-host pypi.org --trusted-host files.pythonhosted.org --upgrade --force-reinstall --no-cache-dir
+```
 3. 配置 API 密钥：
 
 在 `mcp_server.py` 中修改 `TOGETHER_API_KEY`：
