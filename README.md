@@ -24,6 +24,9 @@ brew install pyenv
 pyenv install 3.8.10
 pyenv global 3.8.10
 ```
+- Nodejs 环境
+
+- 下载地址： https://nodejs.org/zh-cn  
 
 ### 2. uv 包管理工具
 uv 是一个快速的 Python 包管理器，需要先安装：
