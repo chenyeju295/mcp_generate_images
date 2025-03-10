@@ -42,16 +42,16 @@ pip install uv
 3. 创建新的 API 密钥
 4. 复制密钥并保存，格式如：`YOUR_API_KEY`
 
-### 4. Cursor IDE
+### 4. Cursor 
 - 下载并安装 [Cursor IDE](https://cursor.sh/)
-- 确保 Cursor IDE 已正确配置 Python 环境
+- 确保 Cursor 已正确配置 Python 环境
 
 ## 安装配置
 
 1. 克隆项目：
 ```bash
-git clone [项目地址]
-cd generate_images
+git clone [https://github.com/chenyeju295/mcp_generate_images.git]
+
 ```
 
 2. 安装依赖：
