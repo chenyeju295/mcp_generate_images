@@ -61,14 +61,14 @@ uv pip install fastmcp requests
 
 3. 配置 API 密钥：
 
-在 `mcp/mcp_server.py` 中修改 `TOGETHER_API_KEY`：
+在 `mcp_server.py` 中修改 `TOGETHER_API_KEY`：
 ```python
 TOGETHER_API_KEY = "your_api_key_here"  # 替换为你的 Together AI API 密钥
 ```
 
 4. 配置服务：
 
-在 `mcp/mcp_server.py` 中可以修改以下配置：
+在 `mcp_server.py` 中可以修改以下配置：
 
 ```python
 CONFIG = {
@@ -98,18 +98,19 @@ CONFIG = {
 ## 运行服务
 
 1. 开发模式运行（带调试界面）：
+- 运行检查是否成功:
 ```bash
-uv run --with fastmcp fastmcp dev ./mcp/mcp_server.py
+uv run --with fastmcp fastmcp dev /Users/username/Documents/mcp_generate_images/mcp_server.py
 ```
-
+   
 2. 生产模式运行：
 ```bash
-uv run --with fastmcp fastmcp run ./mcp/mcp_server.py
+uv run --with fastmcp fastmcp run /Users/username/Documents/mcp_generate_images/mcp_server.py
 ```
 
 3. 如果端口被占用，可以指定其他端口：
 ```bash
-PORT=5174 uv run --with fastmcp fastmcp dev ./mcp/mcp_server.py
+PORT=5174 uv run --with fastmcp fastmcp dev /Users/username/Documents/mcp_generate_images/mcp_server.py
 ```
 
 ## 使用说明
@@ -117,47 +118,19 @@ PORT=5174 uv run --with fastmcp fastmcp dev ./mcp/mcp_server.py
 ### 在 Cursor IDE 中使用
 
 1. 确保服务正在运行
-2. 在 Cursor IDE 中使用以下格式调用：
+2. 在 Cursor 中引入MCP：
+- 添加mcp 服务：
 
-```python
-await generate_image(
-    prompt="你的图片描述",
-    file_name="输出文件名.png",
-    save_folder="/绝对路径/到/保存目录",
-    width=1024,  # 可选
-    height=1024  # 可选
-)
+```bash
+uv run --with fastmcp fastmcp run /Users/username/Documents/mcp_generate_images/mcp_server.py
 ```
+- 如图（运行成功）：
+![image.png](./images/image.png)
 
-### 参数说明
+3. 在 Cursor 中使用：
+- 在composer 的 agent 模式下，直接输入相关的提示：
+![image.png](./images/image_2.png)
 
-- `prompt`: 图片生成提示词，建议不超过500字符
-- `file_name`: 保存的文件名（不含路径，如果没有后缀则默认使用.png）
-- `save_folder`: 保存目录的绝对路径（例如：/Users/username/Documents/images）
-- `width`: 生成图片的宽度（可选，默认1024，最大1024）
-- `height`: 生成图片的高度（可选，默认1024，最大1024）
-
-### 注意事项
-
-1. 路径使用说明：
-   - 必须使用绝对路径
-   - 确保目录具有写入权限
-   - 建议使用 home 目录下的路径，例如：`/Users/username/Documents/images`
-
-2. 权限问题解决：
-   - 检查目录权限：`ls -la /path/to/folder`
-   - 修改目录权限：`chmod 755 /path/to/folder`
-   - 确保当前用户有写入权限
-
-3. 常见错误处理：
-   - 路径不存在：检查并创建目录
-   - 权限不足：检查目录权限
-   - API 超时：服务会自动重试
-
-4. Together AI API 使用注意：
-   - 注意 API 调用限制
-   - 保持 API 密钥安全
-   - 监控 API 使用情况
 
 ## 错误排查
 
@@ -171,45 +144,3 @@ await generate_image(
 6. Python 环境是否正确配置
 7. uv 是否正确安装
 8. 依赖包是否完整安装
-
-## 日志说明
-
-服务运行时会输出详细日志，包括：
-- 请求信息
-- 错误信息
-- 保存路径信息
-- API 响应信息
-
-日志格式：
-```
-%(asctime)s - %(name)s - %(levelname)s - %(message)s
-```
-
-## 开发说明
-
-1. 代码结构：
-   - `mcp_server.py`: 主服务文件
-   - `CONFIG`: 配置对象
-   - `ImageGenerator`: 图像生成类
-   - `validate_save_path`: 路径验证函数
-
-2. 自定义开发：
-   - 可以修改 CONFIG 配置
-   - 可以扩展 ImageGenerator 类
-   - 可以添加新的验证函数
-
-## 问题反馈
-
-如果遇到问题，请提供：
-1. 完整的错误信息
-2. 运行环境信息
-3. 具体的操作步骤
-4. 相关的配置信息
-
-## 更新日志
-
-### v1.0.0
-- 初始版本发布
-- 支持基本的图像生成功能
-- 添加路径验证和错误处理
-- 支持异步处理和批量生成
