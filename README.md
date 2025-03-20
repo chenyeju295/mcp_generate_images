@@ -61,7 +61,7 @@ git clone [https://github.com/chenyeju295/mcp_generate_images.git]
 
 ```
 
-2. 安装依赖：
+2. 安装依赖(cd 到mcp_generate_images 安装)：
 ```bash
 python3 -m pip install fastmcp requests
 ```
