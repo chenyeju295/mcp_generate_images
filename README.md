@@ -1,6 +1,7 @@
 # AI 图像生成服务
 
-基于 Together AI 的图像生成服务，专门设计用于与 Cursor MCP 服务集成。支持自定义图片大小、保存路径等功能。
+基于 Together AI 的图像生成服务，专门设计用于与 Cursor MCP 服务集成。支持自定义图片大小、保存路径等功能.
+
 
 ## 功能特点
 
@@ -140,7 +141,6 @@ uv run --with fastmcp fastmcp run /Users/username/Documents/mcp_generate_images/
 3. 在 Cursor 中使用：
 - 在composer 的 agent 模式下，直接输入相关的提示：
 ![image.png](./images/image_2.png)
-
 
 ## 错误排查
 
