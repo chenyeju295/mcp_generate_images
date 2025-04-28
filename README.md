@@ -1,6 +1,7 @@
 # AI 图像生成服务
 
-基于 Together AI 的图像生成服务，专门设计用于与 Cursor MCP 服务集成。支持自定义图片大小、保存路径等功能。
+基于 Together AI 的图像生成服务，专门设计用于与 Cursor MCP 服务集成。支持自定义图片大小、保存路径等功能.
+
 
 ## 功能特点
 
@@ -61,11 +62,14 @@ git clone [https://github.com/chenyeju295/mcp_generate_images.git]
 
 ```
 
-2. 安装依赖：
+2. 安装依赖(cd 到mcp_generate_images 安装)：
 ```bash
-uv pip install fastmcp requests
+python3 -m pip install fastmcp requests
 ```
-
+出现证书问题可以使用：
+```bash
+python3 -m pip install fastmcp requests --trusted-host pypi.org --trusted-host files.pythonhosted.org --upgrade --force-reinstall --no-cache-dir
+```
 3. 配置 API 密钥：
 
 在 `mcp_server.py` 中修改 `TOGETHER_API_KEY`：
@@ -137,7 +141,6 @@ uv run --with fastmcp fastmcp run /Users/username/Documents/mcp_generate_images/
 3. 在 Cursor 中使用：
 - 在composer 的 agent 模式下，直接输入相关的提示：
 ![image.png](./images/image_2.png)
-
 
 ## 错误排查
 
