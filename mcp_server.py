@@ -1,4 +1,4 @@
-# 描述：基于 Together AI 的图像生成服务，专门设计用于与 Cursor IDE 集成
+# Description: Based on Together AI's image generation service, designed specifically for integration with Cursor IDE
 
 import os
 import logging
@@ -8,20 +8,20 @@ from fastmcp import FastMCP
 import mcp.types as types
 import base64
 import requests
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 from pathlib import Path
 
-# API 配置
+# API configuration
 TOGETHER_API_KEY = "132831df2130ff746e5cd984738dd1857d1a6a348e0bfb8a5d9986499a13b987"
 
-# 服务配置
+# Service configuration
 CONFIG = {
     "api": {
         "url": "https://api.together.xyz/v1/images/generations",
         "model": "black-forest-labs/FLUX.1-schnell-Free",
-        "timeout": 30,
+        "timeout": 60,
         "max_retries": 3,
         "retry_delay": 5
     },
@@ -30,7 +30,7 @@ CONFIG = {
         "max_height": 1024,
         "default_width": 1024,
         "default_height": 1024,
-        "default_steps": 2,
+        "default_steps": 3,
         "max_batch_size": 4
     },
     "output": {
@@ -41,59 +41,59 @@ CONFIG = {
 }
 
 def validate_save_path(save_folder: str) -> tuple[bool, str, Path]:
-    """验证保存路径
+    """Validate the save path
     
     Args:
-        save_folder: 保存目录路径
+        save_folder: Directory path to save files
         
     Returns:
-        tuple: (是否有效, 错误信息, Path对象)
+        tuple: (is_valid, error_message, Path object)
     """
     try:
-        # 转换为 Path 对象
+        # Convert to Path object
         save_path = Path(save_folder)
         
-        # 检查是否是绝对路径
+        # Check if absolute path
         if not save_path.is_absolute():
             example_path = Path.home() / "Documents/images"
-            return False, f"请使用绝对路径。例如: {example_path}", save_path
+            return False, f"Please use an absolute path. Example: {example_path}", save_path
             
-        # 检查父目录是否存在且有写权限
+        # Check if parent directory exists and has write permissions
         parent = save_path.parent
         if not parent.exists():
-            return False, f"父目录不存在: {parent}", save_path
+            return False, f"Parent directory does not exist: {parent}", save_path
             
-        # 尝试创建目录以测试权限
+        # Try to create directory to test permissions
         try:
             save_path.mkdir(parents=True, exist_ok=True)
         except PermissionError:
-            return False, f"没有权限创建或访问目录: {save_path}", save_path
+            return False, f"No permission to create or access directory: {save_path}", save_path
             
-        # 测试写权限
+        # Test write permissions
         test_file = save_path / ".write_test"
         try:
             test_file.touch()
             test_file.unlink()
         except PermissionError:
-            return False, f"没有目录的写入权限: {save_path}", save_path
+            return False, f"No write permission for directory: {save_path}", save_path
             
         return True, "", save_path
         
     except Exception as e:
-        return False, f"路径验证失败: {str(e)}", Path(save_folder)
+        return False, f"Path validation failed: {str(e)}", Path(save_folder)
 
-# 配置编码
+# Configure encoding
 stdin.reconfigure(encoding='utf-8')
 stdout.reconfigure(encoding='utf-8')
 
-# 配置日志
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# 创建 FastMCP 实例
+# Create FastMCP instance
 mcp = FastMCP("image-generation-service")
 
 class ImageGenerator:
@@ -105,24 +105,42 @@ class ImageGenerator:
         })
         self.executor = ThreadPoolExecutor(max_workers=4)
 
-    async def generate(self, prompt: str, width: int = None, height: int = None, steps: int = None) -> List[str]:
-        """异步生成图像
+    async def generate(self, prompt: str, width: int = None, height: int = None, steps: int = None) -> Tuple[List[str], str]:
+        """Generate images asynchronously
         
         Args:
-            prompt: 图片生成提示词
-            width: 图片宽度
-            height: 图片高度
-            steps: 生成步数
+            prompt: Image generation prompt
+            width: Image width
+            height: Image height
+            steps: Generation steps, between 1-4
             
         Returns:
-            List[str]: 生成的图片的 base64 编码列表
+            Tuple[List[str], str]: List of base64 encoded images and error message (if any)
         """
         width = width or CONFIG["image"]["default_width"]
         height = height or CONFIG["image"]["default_height"]
         steps = steps or CONFIG["image"]["default_steps"]
+        
+        # Output parameters for diagnostics
+        logger.info(f"Generation parameters: prompt='{prompt[:50]}...', width={width}, height={height}, steps={steps}")
+        
+        # Check maximum size supported by the model
+        model_max_size = 1024  # Actual maximum size supported by the model
+        if width > model_max_size or height > model_max_size:
+            return [], f"Current model '{CONFIG['api']['model']}' only supports a maximum size of {model_max_size}x{model_max_size}"
+        
+        # Validate steps parameter
+        if steps < 1 or steps > 4:
+            return [], f"Steps parameter must be between 1-4, current value: {steps}"
 
         for attempt in range(CONFIG["api"]["max_retries"]):
             try:
+                logger.info(f"Attempting to generate image (Attempt {attempt + 1}/{CONFIG['api']['max_retries']})")
+                
+                # Increase timeout for different image sizes
+                timeout = CONFIG["api"]["timeout"] * (1 + (width * height) / (1024 * 1024))
+                logger.info(f"API request timeout set to {timeout:.1f} seconds")
+                
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
                     self.executor,
@@ -137,71 +155,113 @@ class ImageGenerator:
                             "n": CONFIG["image"]["max_batch_size"],
                             "response_format": "b64_json"
                         },
-                        timeout=CONFIG["api"]["timeout"]
+                        timeout=timeout
                     )
                 )
                 
                 if response.status_code == 200:
                     data = response.json()
                     if 'data' in data and len(data['data']) > 0:
-                        return [img.get('b64_json', '') for img in data['data'] if img.get('b64_json')]
+                        images = [img.get('b64_json', '') for img in data['data'] if img.get('b64_json')]
+                        if images:
+                            return images, ""
+                        else:
+                            return [], "API returned success but no image data"
+                    else:
+                        error_msg = f"API returned incorrect structure: {json.dumps(data)[:200]}..."
+                        logger.error(error_msg)
+                        return [], error_msg
+                elif response.status_code == 401:
+                    error_msg = "API authentication failed, please check API key"
+                    logger.error(error_msg)
+                    return [], error_msg
                 elif response.status_code == 429:  # Rate limit
+                    error_msg = "API rate limited"
+                    logger.warning(error_msg)
                     if attempt < CONFIG["api"]["max_retries"] - 1:
-                        await asyncio.sleep(CONFIG["api"]["retry_delay"])
+                        wait_time = CONFIG["api"]["retry_delay"] * (attempt + 1)
+                        logger.info(f"Waiting {wait_time} seconds before retrying...")
+                        await asyncio.sleep(wait_time)
                         continue
-                
-                logger.error(f"API请求失败: {response.status_code}")
-                logger.error(f"响应: {response.text}")
-                return []
+                    return [], error_msg
+                else:
+                    try:
+                        error_data = response.json()
+                        error_msg = f"API request failed (HTTP {response.status_code}): {json.dumps(error_data)[:200]}..."
+                    except:
+                        error_msg = f"API request failed (HTTP {response.status_code}): {response.text[:200]}..."
+                    
+                    logger.error(error_msg)
+                    
+                    if attempt < CONFIG["api"]["max_retries"] - 1 and response.status_code >= 500:
+                        wait_time = CONFIG["api"]["retry_delay"] * (attempt + 1)
+                        logger.info(f"Server error, waiting {wait_time} seconds before retrying...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    
+                    return [], error_msg
                 
             except requests.Timeout:
-                logger.error(f"API请求超时 (尝试 {attempt + 1}/{CONFIG['api']['max_retries']})")
+                error_msg = f"API request timeout (Attempt {attempt + 1}/{CONFIG['api']['max_retries']})"
+                logger.error(error_msg)
                 if attempt < CONFIG["api"]["max_retries"] - 1:
-                    await asyncio.sleep(CONFIG["api"]["retry_delay"])
+                    wait_time = CONFIG["api"]["retry_delay"] * (attempt + 1)
+                    logger.info(f"Waiting {wait_time} seconds before retrying...")
+                    await asyncio.sleep(wait_time)
                     continue
-                return []
+                return [], error_msg
+            except requests.ConnectionError:
+                error_msg = "Connection to API server failed, please check network connection"
+                logger.error(error_msg)
+                if attempt < CONFIG["api"]["max_retries"] - 1:
+                    wait_time = CONFIG["api"]["retry_delay"] * (attempt + 1)
+                    logger.info(f"Waiting {wait_time} seconds before retrying...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                return [], error_msg
             except Exception as e:
-                logger.error(f"生成图片时出错: {str(e)}")
-                return []
+                error_msg = f"Error generating image: {str(e)}"
+                logger.error(error_msg)
+                return [], error_msg
         
-        return []
+        return [], "Maximum retry attempts reached, image generation failed"
 
-# 创建生成器实例
+# Create generator instance
 generator = ImageGenerator()
 
 @mcp.tool("use_description")
 async def list_tools():
-    """列出所有可用的工具及其参数"""
+    """List all available tools and their parameters"""
     example_path = str(Path.home() / "Documents/images")
     return {
         "tools": [
             {
                 "name": "generate_image",
-                "description": "生成图片",
+                "description": "Generate image",
                 "parameters": {
                     "prompt": {
                         "type": "string",
-                        "description": "图片生成提示词，建议不超过500字符",
+                        "description": "Image generation prompt, recommended to be under 500 characters",
                         "required": True
                     },
                     "file_name": {
                         "type": "string",
-                        "description": "保存的文件名(不含路径，如果没有后缀则默认使用.png)",
+                        "description": "Filename to save (without path, defaults to .png if no extension)",
                         "required": True
                     },
                     "save_folder": {
                         "type": "string",
-                        "description": f"保存目录的绝对路径 (例如: {example_path})",
+                        "description": f"Absolute path to save directory (example: {example_path})",
                         "required": True
                     },
-                    "width": {
-                        "type": "number",
-                        "description": f"生成图片的宽度(可选,默认{CONFIG['image']['default_width']},最大{CONFIG['image']['max_width']})",
+                    "aspect_ratio": {
+                        "type": "string",
+                        "description": "Image aspect ratio, supports '1:1', '4:3', '16:9', '3:4', '9:16'. Default is '1:1'",
                         "required": False
                     },
-                    "height": {
+                    "steps": {
                         "type": "number",
-                        "description": f"生成图片的高度(可选,默认{CONFIG['image']['default_height']},最大{CONFIG['image']['max_height']})",
+                        "description": "Number of inference/sampling steps — generally more steps produces higher quality but takes longer, supports values 1-4, default is 3",
                         "required": False
                     }
                 }
@@ -210,80 +270,100 @@ async def list_tools():
     }
 
 @mcp.tool("generate_image")
-async def generate_image(prompt: str, file_name: str, save_folder: str, width: int = None, height: int = None) -> list[types.TextContent]:
-    """生成图片
+async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_ratio: str = "1:1", steps: int = 3) -> list[types.TextContent]:
+    """Generate image
     
     Args:
-        prompt: 图片生成提示词
-        file_name: 保存的文件名
-        save_folder: 保存目录路径
-        width: 生成图片的宽度(可选)
-        height: 生成图片的高度(可选)
+        prompt: Image generation prompt
+        file_name: Filename to save
+        save_folder: Directory path to save
+        aspect_ratio: Image aspect ratio, supports '1:1', '4:3', '16:9', '3:4', '9:16'
+        steps: Number of inference/sampling steps, supports values 1-4
         
     Returns:
-        List: 包含生成结果的 JSON 字符串
+        List: JSON string containing generation results
     """
-    logger.info(f"收到生成请求: {prompt}")
+    logger.info(f"Received generation request: {prompt}")
     
     try:
-        # 参数验证
+        # Parameter validation
         if not prompt:
-            raise ValueError("prompt不能为空")
+            raise ValueError("Prompt cannot be empty")
             
         if not save_folder:
             save_folder = CONFIG["output"]["base_folder"]
             
-        # 验证保存路径
+        # Validate save path
         is_valid, error_msg, save_path = validate_save_path(save_folder)
         if not is_valid:
             raise ValueError(error_msg)
-            
-        width = width or CONFIG["image"]["default_width"]
-        height = height or CONFIG["image"]["default_height"]
+        
+        # Validate steps parameter
+        if steps < 1 or steps > 4:
+            raise ValueError(f"Steps parameter must be between 1-4, current value: {steps}")
+        
+        # Calculate dimensions from aspect ratio
+        aspect_ratios = {
+            "1:1": (1024, 1024),
+            "4:3": (1024, 768),
+            "16:9": (1024, 576),
+            "3:4": (768, 1024),
+            "9:16": (576, 1024)
+        }
+        
+        if aspect_ratio not in aspect_ratios:
+            valid_ratios = ", ".join(aspect_ratios.keys())
+            raise ValueError(f"Unsupported aspect ratio: {aspect_ratio}, please use one of: {valid_ratios}")
+        
+        width, height = aspect_ratios[aspect_ratio]
+        logger.info(f"Using aspect ratio {aspect_ratio}, calculated width={width}, height={height}, steps={steps}")
         
         if width <= 0 or height <= 0 or width > CONFIG["image"]["max_width"] or height > CONFIG["image"]["max_height"]:
             raise ValueError(
-                f"width和height必须大于0且不超过{CONFIG['image']['max_width']}，"
-                f"当前值: width={width}, height={height}"
+                f"Width and height must be greater than 0 and not exceed {CONFIG['image']['max_width']}x{CONFIG['image']['max_height']}, "
+                f"current values: width={width}, height={height}"
             )
             
-        # 确保文件名有正确的扩展名
+        # Ensure filename has correct extension
         file_ext = Path(file_name).suffix.lower()
         if not file_ext or file_ext not in CONFIG["output"]["allowed_extensions"]:
             file_name = f"{Path(file_name).stem}{CONFIG['output']['default_extension']}"
             
-        # 生成图片
-        image_data_list = await generator.generate(prompt, width, height)
+        # Generate image
+        image_data_list, error_message = await generator.generate(prompt, width, height, steps)
         if not image_data_list:
-            raise Exception("未能生成图片")
+            if error_message:
+                raise Exception(f"Failed to generate image: {error_message}")
+            else:
+                raise Exception("Failed to generate image: Unknown error")
             
-        # 保存图片
+        # Save images
         saved_images = []
         for i, image_data in enumerate(image_data_list):
             try:
-                # 构造保存路径
+                # Construct save path
                 if i > 0:
                     current_save_path = save_path / f"{Path(file_name).stem}_{i}{Path(file_name).suffix}"
                 else:
                     current_save_path = save_path / file_name
                     
-                # 保存图片
+                # Save image
                 current_save_path.write_bytes(base64.b64decode(image_data))
                 saved_images.append(str(current_save_path))
-                logger.info(f"图片已保存: {current_save_path}")
+                logger.info(f"Image saved: {current_save_path}")
             except PermissionError:
-                logger.error(f"没有权限保存图片到: {current_save_path}")
+                logger.error(f"No permission to save image to: {current_save_path}")
                 continue
             except Exception as e:
-                logger.error(f"保存图片失败: {str(e)}")
+                logger.error(f"Failed to save image: {str(e)}")
                 continue
         
         if not saved_images:
             raise Exception(
-                "所有图片保存失败。请确保:\n"
-                "1. 使用绝对路径 (例如: /Users/username/Documents/images)\n"
-                "2. 目录具有写入权限\n"
-                "3. 磁盘空间充足"
+                "All image saves failed. Please ensure:\n"
+                "1. Using absolute path (example: /Users/username/Documents/images)\n"
+                "2. Directory has write permissions\n"
+                "3. Sufficient disk space"
             )
         
         return [
@@ -299,7 +379,7 @@ async def generate_image(prompt: str, file_name: str, save_folder: str, width: i
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"生成图片失败: {error_msg}")
+        logger.error(f"Image generation failed: {error_msg}")
         return [
             types.TextContent(
                 type="text",
@@ -312,5 +392,5 @@ async def generate_image(prompt: str, file_name: str, save_folder: str, width: i
         ]
 
 if __name__ == "__main__":
-    logger.info("启动图像生成服务...")
+    logger.info("Starting image generation service...")
     mcp.run()
