@@ -29,9 +29,10 @@ CONFIG = {
     "api": {
         "base_url": "https://ark.cn-beijing.volces.com/api/v3",
         "model": "doubao-seedream-3-0-t2i-250415",  # 火山引擎豆包模型
-        "timeout": 120,  # 增加超时时间
-        "max_retries": 3,
-        "retry_delay": 5
+        "timeout": 180,  # 增加超时时间到3分钟
+        "max_retries": 2,  # 减少重试次数以避免总体超时
+        "retry_delay": 3,
+        "watermark": False
     },
     "image": {
         "max_width": 1024,
@@ -150,25 +151,35 @@ class ImageGenerator:
                 if response and response.data and len(response.data) > 0:
                     # 火山引擎返回的是图片URL，需要下载并转换为base64
                     image_urls = [img.url for img in response.data if img.url]
+                    logger.info(f"Received {len(image_urls)} image URLs from API")
+                    
                     if image_urls:
                         # 下载图片并转换为base64
                         base64_images = []
-                        for url in image_urls:
+                        for i, url in enumerate(image_urls):
                             try:
-                                img_response = requests.get(url, timeout=CONFIG["api"]["timeout"])
+                                logger.info(f"Downloading image {i+1}/{len(image_urls)} from URL...")
+                                # 使用较短的超时时间下载图片
+                                img_response = requests.get(url, timeout=30)
                                 if img_response.status_code == 200:
                                     img_base64 = base64.b64encode(img_response.content).decode('utf-8')
                                     base64_images.append(img_base64)
+                                    logger.info(f"Successfully downloaded and encoded image {i+1}")
                                 else:
-                                    logger.warning(f"Failed to download image from URL: {url}")
+                                    logger.warning(f"Failed to download image from URL: {url}, status: {img_response.status_code}")
+                                    # 如果下载失败，仍然返回已有的图片（如果有的话）
+                            except requests.Timeout:
+                                logger.error(f"Timeout downloading image from {url}")
+                                continue
                             except Exception as e:
                                 logger.error(f"Error downloading image from {url}: {str(e)}")
                                 continue
                         
                         if base64_images:
+                            logger.info(f"Successfully processed {len(base64_images)} images")
                             return base64_images, ""
                         else:
-                            return [], "Failed to download generated images"
+                            return [], "Failed to download any generated images"
                     else:
                         return [], "API returned success but no image URLs"
                 else:
@@ -177,12 +188,31 @@ class ImageGenerator:
                     return [], error_msg
                 
             except Exception as e:
-                error_msg = f"Error generating image (Attempt {attempt + 1}/{CONFIG['api']['max_retries']}): {str(e)}"
-                logger.error(error_msg)
+                error_str = str(e)
                 
-                if attempt < CONFIG["api"]["max_retries"] - 1:
+                # 检查特定的错误类型
+                if "ModelNotOpen" in error_str:
+                    error_msg = (
+                        f"模型未激活: 您的账户还未激活模型 {CONFIG['api']['model']}。"
+                        "请在火山引擎方舟控制台中激活该模型服务。"
+                    )
+                    logger.error(error_msg)
+                    return [], error_msg
+                elif "401" in error_str or "Unauthorized" in error_str:
+                    error_msg = "API认证失败，请检查ARK_API_KEY环境变量是否正确设置"
+                    logger.error(error_msg)
+                    return [], error_msg
+                elif "timeout" in error_str.lower():
+                    error_msg = f"API请求超时 (尝试 {attempt + 1}/{CONFIG['api']['max_retries']})"
+                    logger.error(error_msg)
+                else:
+                    error_msg = f"图像生成错误 (尝试 {attempt + 1}/{CONFIG['api']['max_retries']}): {error_str}"
+                    logger.error(error_msg)
+                
+                # 对于非永久性错误，进行重试
+                if attempt < CONFIG["api"]["max_retries"] - 1 and "ModelNotOpen" not in error_str and "401" not in error_str:
                     wait_time = CONFIG["api"]["retry_delay"] * (attempt + 1)
-                    logger.info(f"Waiting {wait_time} seconds before retrying...")
+                    logger.info(f"等待 {wait_time} 秒后重试...")
                     await asyncio.sleep(wait_time)
                     continue
                 
