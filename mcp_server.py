@@ -1,4 +1,4 @@
-# Description: Based on Together AI's image generation service, designed specifically for integration with Cursor IDE
+# Description: Based on Volcengine (Doubao) image generation service, designed specifically for integration with Cursor IDE
 
 import os
 import logging
@@ -12,16 +12,24 @@ from typing import Optional, List, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 from pathlib import Path
+# 通过 pip install 'volcengine-python-sdk[ark]' 安装方舟SDK
+from volcenginesdkarkruntime import Ark
 
-# API configuration
-TOGETHER_API_KEY = "132831df2130ff746e5cd984738dd1857d1a6a348e0bfb8a5d9986499a13b987"
+# API configuration - 从环境变量读取火山引擎API密钥
+VOLCENGINE_API_KEY = os.environ.get("ARK_API_KEY")
+
+if not VOLCENGINE_API_KEY:
+    raise ValueError(
+        "ARK_API_KEY environment variable is not set. "
+        "Please set it using: export ARK_API_KEY=your_api_key_here"
+    )
 
 # Service configuration
 CONFIG = {
     "api": {
-        "url": "https://api.together.xyz/v1/images/generations",
-        "model": "black-forest-labs/FLUX.1-schnell-Free",
-        "timeout": 60,
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "model": "doubao-seedream-3-0-t2i-250415",  # 火山引擎豆包模型
+        "timeout": 120,  # 增加超时时间
         "max_retries": 3,
         "retry_delay": 5
     },
@@ -30,8 +38,7 @@ CONFIG = {
         "max_height": 1024,
         "default_width": 1024,
         "default_height": 1024,
-        "default_steps": 3,
-        "max_batch_size": 4
+        "max_batch_size": 1  # 火山引擎一次生成一张图片
     },
     "output": {
         "base_folder": str(Path.home() / "Documents/generate_images"),
@@ -98,130 +105,87 @@ mcp = FastMCP("image-generation-service")
 
 class ImageGenerator:
     def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            "Authorization": f"Bearer {TOGETHER_API_KEY}",
-            "Content-Type": "application/json"
-        })
+        # 初始化Ark客户端
+        self.client = Ark(
+            base_url=CONFIG["api"]["base_url"],
+            api_key=VOLCENGINE_API_KEY,
+        )
         self.executor = ThreadPoolExecutor(max_workers=4)
 
-    async def generate(self, prompt: str, width: int = None, height: int = None, steps: int = None) -> Tuple[List[str], str]:
-        """Generate images asynchronously
+    async def generate(self, prompt: str, width: int = None, height: int = None) -> Tuple[List[str], str]:
+        """Generate images asynchronously using Volcengine API
         
         Args:
             prompt: Image generation prompt
-            width: Image width
-            height: Image height
-            steps: Generation steps, between 1-4
+            width: Image width (ignored for now, as Volcengine API handles sizing automatically)
+            height: Image height (ignored for now, as Volcengine API handles sizing automatically)
             
         Returns:
-            Tuple[List[str], str]: List of base64 encoded images and error message (if any)
+            Tuple[List[str], str]: List of image URLs (not base64) and error message (if any)
         """
         width = width or CONFIG["image"]["default_width"]
         height = height or CONFIG["image"]["default_height"]
-        steps = steps or CONFIG["image"]["default_steps"]
         
         # Output parameters for diagnostics
-        logger.info(f"Generation parameters: prompt='{prompt[:50]}...', width={width}, height={height}, steps={steps}")
+        logger.info(f"Generation parameters: prompt='{prompt[:50]}...', width={width}, height={height}")
         
         # Check maximum size supported by the model
-        model_max_size = 1024  # Actual maximum size supported by the model
+        model_max_size = 1024
         if width > model_max_size or height > model_max_size:
             return [], f"Current model '{CONFIG['api']['model']}' only supports a maximum size of {model_max_size}x{model_max_size}"
-        
-        # Validate steps parameter
-        if steps < 1 or steps > 4:
-            return [], f"Steps parameter must be between 1-4, current value: {steps}"
 
         for attempt in range(CONFIG["api"]["max_retries"]):
             try:
                 logger.info(f"Attempting to generate image (Attempt {attempt + 1}/{CONFIG['api']['max_retries']})")
                 
-                # Increase timeout for different image sizes
-                timeout = CONFIG["api"]["timeout"] * (1 + (width * height) / (1024 * 1024))
-                logger.info(f"API request timeout set to {timeout:.1f} seconds")
-                
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
                     self.executor,
-                    lambda: self.session.post(
-                        CONFIG["api"]["url"],
-                        json={
-                            "model": CONFIG["api"]["model"],
-                            "prompt": prompt,
-                            "width": width,
-                            "height": height,
-                            "steps": steps,
-                            "n": CONFIG["image"]["max_batch_size"],
-                            "response_format": "b64_json"
-                        },
-                        timeout=timeout
+                    lambda: self.client.images.generate(
+                        model=CONFIG["api"]["model"],
+                        prompt=prompt
                     )
                 )
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'data' in data and len(data['data']) > 0:
-                        images = [img.get('b64_json', '') for img in data['data'] if img.get('b64_json')]
-                        if images:
-                            return images, ""
+                if response and response.data and len(response.data) > 0:
+                    # 火山引擎返回的是图片URL，需要下载并转换为base64
+                    image_urls = [img.url for img in response.data if img.url]
+                    if image_urls:
+                        # 下载图片并转换为base64
+                        base64_images = []
+                        for url in image_urls:
+                            try:
+                                img_response = requests.get(url, timeout=CONFIG["api"]["timeout"])
+                                if img_response.status_code == 200:
+                                    img_base64 = base64.b64encode(img_response.content).decode('utf-8')
+                                    base64_images.append(img_base64)
+                                else:
+                                    logger.warning(f"Failed to download image from URL: {url}")
+                            except Exception as e:
+                                logger.error(f"Error downloading image from {url}: {str(e)}")
+                                continue
+                        
+                        if base64_images:
+                            return base64_images, ""
                         else:
-                            return [], "API returned success but no image data"
+                            return [], "Failed to download generated images"
                     else:
-                        error_msg = f"API returned incorrect structure: {json.dumps(data)[:200]}..."
-                        logger.error(error_msg)
-                        return [], error_msg
-                elif response.status_code == 401:
-                    error_msg = "API authentication failed, please check API key"
-                    logger.error(error_msg)
-                    return [], error_msg
-                elif response.status_code == 429:  # Rate limit
-                    error_msg = "API rate limited"
-                    logger.warning(error_msg)
-                    if attempt < CONFIG["api"]["max_retries"] - 1:
-                        wait_time = CONFIG["api"]["retry_delay"] * (attempt + 1)
-                        logger.info(f"Waiting {wait_time} seconds before retrying...")
-                        await asyncio.sleep(wait_time)
-                        continue
-                    return [], error_msg
+                        return [], "API returned success but no image URLs"
                 else:
-                    try:
-                        error_data = response.json()
-                        error_msg = f"API request failed (HTTP {response.status_code}): {json.dumps(error_data)[:200]}..."
-                    except:
-                        error_msg = f"API request failed (HTTP {response.status_code}): {response.text[:200]}..."
-                    
+                    error_msg = "API returned empty or invalid response"
                     logger.error(error_msg)
-                    
-                    if attempt < CONFIG["api"]["max_retries"] - 1 and response.status_code >= 500:
-                        wait_time = CONFIG["api"]["retry_delay"] * (attempt + 1)
-                        logger.info(f"Server error, waiting {wait_time} seconds before retrying...")
-                        await asyncio.sleep(wait_time)
-                        continue
-                    
                     return [], error_msg
                 
-            except requests.Timeout:
-                error_msg = f"API request timeout (Attempt {attempt + 1}/{CONFIG['api']['max_retries']})"
-                logger.error(error_msg)
-                if attempt < CONFIG["api"]["max_retries"] - 1:
-                    wait_time = CONFIG["api"]["retry_delay"] * (attempt + 1)
-                    logger.info(f"Waiting {wait_time} seconds before retrying...")
-                    await asyncio.sleep(wait_time)
-                    continue
-                return [], error_msg
-            except requests.ConnectionError:
-                error_msg = "Connection to API server failed, please check network connection"
-                logger.error(error_msg)
-                if attempt < CONFIG["api"]["max_retries"] - 1:
-                    wait_time = CONFIG["api"]["retry_delay"] * (attempt + 1)
-                    logger.info(f"Waiting {wait_time} seconds before retrying...")
-                    await asyncio.sleep(wait_time)
-                    continue
-                return [], error_msg
             except Exception as e:
-                error_msg = f"Error generating image: {str(e)}"
+                error_msg = f"Error generating image (Attempt {attempt + 1}/{CONFIG['api']['max_retries']}): {str(e)}"
                 logger.error(error_msg)
+                
+                if attempt < CONFIG["api"]["max_retries"] - 1:
+                    wait_time = CONFIG["api"]["retry_delay"] * (attempt + 1)
+                    logger.info(f"Waiting {wait_time} seconds before retrying...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
                 return [], error_msg
         
         return [], "Maximum retry attempts reached, image generation failed"
@@ -237,7 +201,7 @@ async def list_tools():
         "tools": [
             {
                 "name": "generate_image",
-                "description": "Generate image",
+                "description": "Generate image using Volcengine Doubao model",
                 "parameters": {
                     "prompt": {
                         "type": "string",
@@ -258,11 +222,6 @@ async def list_tools():
                         "type": "string",
                         "description": "Image aspect ratio, supports '1:1', '4:3', '16:9', '3:4', '9:16'. Default is '1:1'",
                         "required": False
-                    },
-                    "steps": {
-                        "type": "number",
-                        "description": "Number of inference/sampling steps — generally more steps produces higher quality but takes longer, supports values 1-4, default is 3",
-                        "required": False
                     }
                 }
             }
@@ -270,15 +229,14 @@ async def list_tools():
     }
 
 @mcp.tool("generate_image")
-async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_ratio: str = "1:1", steps: int = 3) -> list[types.TextContent]:
-    """Generate image
+async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_ratio: str = "1:1") -> list[types.TextContent]:
+    """Generate image using Volcengine Doubao model
     
     Args:
         prompt: Image generation prompt
         file_name: Filename to save
         save_folder: Directory path to save
         aspect_ratio: Image aspect ratio, supports '1:1', '4:3', '16:9', '3:4', '9:16'
-        steps: Number of inference/sampling steps, supports values 1-4
         
     Returns:
         List: JSON string containing generation results
@@ -298,10 +256,6 @@ async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_r
         if not is_valid:
             raise ValueError(error_msg)
         
-        # Validate steps parameter
-        if steps < 1 or steps > 4:
-            raise ValueError(f"Steps parameter must be between 1-4, current value: {steps}")
-        
         # Calculate dimensions from aspect ratio
         aspect_ratios = {
             "1:1": (1024, 1024),
@@ -316,7 +270,7 @@ async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_r
             raise ValueError(f"Unsupported aspect ratio: {aspect_ratio}, please use one of: {valid_ratios}")
         
         width, height = aspect_ratios[aspect_ratio]
-        logger.info(f"Using aspect ratio {aspect_ratio}, calculated width={width}, height={height}, steps={steps}")
+        logger.info(f"Using aspect ratio {aspect_ratio}, calculated width={width}, height={height}")
         
         if width <= 0 or height <= 0 or width > CONFIG["image"]["max_width"] or height > CONFIG["image"]["max_height"]:
             raise ValueError(
@@ -330,7 +284,7 @@ async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_r
             file_name = f"{Path(file_name).stem}{CONFIG['output']['default_extension']}"
             
         # Generate image
-        image_data_list, error_message = await generator.generate(prompt, width, height, steps)
+        image_data_list, error_message = await generator.generate(prompt, width, height)
         if not image_data_list:
             if error_message:
                 raise Exception(f"Failed to generate image: {error_message}")
@@ -392,5 +346,5 @@ async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_r
         ]
 
 if __name__ == "__main__":
-    logger.info("Starting image generation service...")
+    logger.info("Starting Volcengine (Doubao) image generation service...")
     mcp.run()

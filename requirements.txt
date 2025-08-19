@@ -1,0 +1,5 @@
+fastmcp
+volcengine-python-sdk[ark]
+requests
+pathlib
+
