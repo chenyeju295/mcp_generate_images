@@ -31,8 +31,7 @@ CONFIG = {
         "model": "doubao-seedream-3-0-t2i-250415",  # 火山引擎豆包模型
         "timeout": 180,  # 增加超时时间到3分钟
         "max_retries": 2,  # 减少重试次数以避免总体超时
-        "retry_delay": 3,
-        "watermark": False
+        "retry_delay": 3
     },
     "image": {
         "max_width": 1024,
@@ -144,7 +143,8 @@ class ImageGenerator:
                     self.executor,
                     lambda: self.client.images.generate(
                         model=CONFIG["api"]["model"],
-                        prompt=prompt
+                        prompt=prompt,
+                                watermark= False,
                     )
                 )
                 
