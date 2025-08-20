@@ -144,7 +144,7 @@ class ImageGenerator:
                     lambda: self.client.images.generate(
                         model=CONFIG["api"]["model"],
                         prompt=prompt,
-                                watermark= False,
+                        watermark= False,
                     )
                 )
                 
