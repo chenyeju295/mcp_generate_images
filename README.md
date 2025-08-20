@@ -70,7 +70,7 @@ cd mcp_generate_images
 ### 2. 安装依赖(cd 到mcp_generate_images 安装)
  
 ```bash
-python3 -m pip install fastmcp requests volcengine-python-sdk[ark]
+python3 -m pip install fastmcp requests 'volcengine-python-sdk[ark]'
 ```
 
 或者使用requirements.txt文件：
@@ -82,7 +82,7 @@ pip install -r requirements.txt
 出现证书问题可以使用：
 
 ```bash
-python3 -m pip install fastmcp requests volcengine-python-sdk[ark] --trusted-host pypi.org --trusted-host files.pythonhosted.org --upgrade --force-reinstall --no-cache-dir
+python3 -m pip install fastmcp requests 'volcengine-python-sdk[ark]' --trusted-host pypi.org --trusted-host files.pythonhosted.org --upgrade --force-reinstall --no-cache-dir
 ```
 
 tips: 需确保安装成功，否则配置MCP 服务会报红。
