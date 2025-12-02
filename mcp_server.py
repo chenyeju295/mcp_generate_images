@@ -34,8 +34,10 @@ CONFIG = {
         "retry_delay": 3
     },
     "image": {
-        "max_width": 1024,
-        "max_height": 1024,
+        "max_width": 2048,
+        "max_height": 2048,
+        "min_width": 512,
+        "min_height": 512,
         "default_width": 1024,
         "default_height": 1024,
         "max_batch_size": 1  # 火山引擎一次生成一张图片
@@ -112,27 +114,43 @@ class ImageGenerator:
         )
         self.executor = ThreadPoolExecutor(max_workers=4)
 
-    async def generate(self, prompt: str, width: int = None, height: int = None) -> Tuple[List[str], str]:
+    async def generate(self, prompt: str, size: str = None, width: int = None, height: int = None) -> Tuple[List[str], str]:
         """Generate images asynchronously using Volcengine API
         
         Args:
             prompt: Image generation prompt
-            width: Image width (ignored for now, as Volcengine API handles sizing automatically)
-            height: Image height (ignored for now, as Volcengine API handles sizing automatically)
+            size: Image size in format "WIDTHxHEIGHT" (e.g., "1024x1024"), takes precedence over width/height
+            width: Image width (used if size is not provided)
+            height: Image height (used if size is not provided)
             
         Returns:
             Tuple[List[str], str]: List of image URLs (not base64) and error message (if any)
         """
-        width = width or CONFIG["image"]["default_width"]
-        height = height or CONFIG["image"]["default_height"]
+        # Parse size if provided, otherwise use width/height
+        if size:
+            try:
+                parts = size.split('x')
+                if len(parts) != 2:
+                    return [], f"Invalid size format: {size}. Expected format: WIDTHxHEIGHT (e.g., '1024x1024')"
+                width = int(parts[0])
+                height = int(parts[1])
+            except ValueError:
+                return [], f"Invalid size format: {size}. Width and height must be integers"
+        else:
+            width = width or CONFIG["image"]["default_width"]
+            height = height or CONFIG["image"]["default_height"]
+        
+        # Validate size constraints
+        min_size = CONFIG["image"]["min_width"]
+        max_size = CONFIG["image"]["max_width"]
+        if width < min_size or height < min_size:
+            return [], f"Size must be at least {min_size}x{min_size}, got {width}x{height}"
+        if width > max_size or height > max_size:
+            return [], f"Size must be at most {max_size}x{max_size}, got {width}x{height}"
         
         # Output parameters for diagnostics
-        logger.info(f"Generation parameters: prompt='{prompt[:50]}...', width={width}, height={height}")
-        
-        # Check maximum size supported by the model
-        model_max_size = 1024
-        if width > model_max_size or height > model_max_size:
-            return [], f"Current model '{CONFIG['api']['model']}' only supports a maximum size of {model_max_size}x{model_max_size}"
+        size_str = f"{width}x{height}"
+        logger.info(f"Generation parameters: prompt='{prompt[:50]}...', size={size_str}")
 
         for attempt in range(CONFIG["api"]["max_retries"]):
             try:
@@ -144,7 +162,8 @@ class ImageGenerator:
                     lambda: self.client.images.generate(
                         model=CONFIG["api"]["model"],
                         prompt=prompt,
-                        watermark= False,
+                        size=size_str,
+                        watermark=False,
                     )
                 )
                 
@@ -250,7 +269,12 @@ async def list_tools():
                     },
                     "aspect_ratio": {
                         "type": "string",
-                        "description": "Image aspect ratio, supports '1:1', '4:3', '16:9', '3:4', '9:16'. Default is '1:1'",
+                        "description": "Image aspect ratio, supports '1:1', '4:3', '16:9', '3:4', '9:16', '3:2', '2:3', '21:9'. Default is '1:1'. If size is provided, aspect_ratio will be ignored.",
+                        "required": False
+                    },
+                    "size": {
+                        "type": "string",
+                        "description": "Image size in format 'WIDTHxHEIGHT' (e.g., '1024x1024'). Total pixel range: [512x512, 2048x2048]. Default: '1024x1024'. Takes precedence over aspect_ratio.",
                         "required": False
                     }
                 }
@@ -259,14 +283,15 @@ async def list_tools():
     }
 
 @mcp.tool("generate_image")
-async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_ratio: str = "1:1") -> list[types.TextContent]:
+async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_ratio: str = "1:1", size: str = None) -> list[types.TextContent]:
     """Generate image using Volcengine Doubao model
     
     Args:
         prompt: Image generation prompt
         file_name: Filename to save
         save_folder: Directory path to save
-        aspect_ratio: Image aspect ratio, supports '1:1', '4:3', '16:9', '3:4', '9:16'
+        aspect_ratio: Image aspect ratio, supports '1:1', '4:3', '16:9', '3:4', '9:16', '3:2', '2:3', '21:9'. Default is '1:1'. Ignored if size is provided.
+        size: Image size in format 'WIDTHxHEIGHT' (e.g., '1024x1024'). Total pixel range: [512x512, 2048x2048]. Default: '1024x1024'. Takes precedence over aspect_ratio.
         
     Returns:
         List: JSON string containing generation results
@@ -286,27 +311,46 @@ async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_r
         if not is_valid:
             raise ValueError(error_msg)
         
-        # Calculate dimensions from aspect ratio
-        aspect_ratios = {
-            "1:1": (1024, 1024),
-            "4:3": (1024, 768),
-            "16:9": (1024, 576),
-            "3:4": (768, 1024),
-            "9:16": (576, 1024)
-        }
+        # Determine size: use size parameter if provided, otherwise calculate from aspect_ratio
+        if size:
+            # Validate size format
+            try:
+                parts = size.split('x')
+                if len(parts) != 2:
+                    raise ValueError(f"Invalid size format: {size}. Expected format: WIDTHxHEIGHT (e.g., '1024x1024')")
+                width = int(parts[0])
+                height = int(parts[1])
+            except ValueError as e:
+                raise ValueError(f"Invalid size format: {size}. {str(e)}")
+            
+            # Validate size constraints
+            min_size = CONFIG["image"]["min_width"]
+            max_size = CONFIG["image"]["max_width"]
+            if width < min_size or height < min_size:
+                raise ValueError(f"Size must be at least {min_size}x{min_size}, got {width}x{height}")
+            if width > max_size or height > max_size:
+                raise ValueError(f"Size must be at most {max_size}x{max_size}, got {width}x{height}")
+            
+            logger.info(f"Using size parameter: {size}")
+        else:
+            # Calculate dimensions from aspect ratio using recommended pixel values
+            aspect_ratios = {
+                "1:1": (1024, 1024),
+                    "4:3": (1152, 864),
+                    "16:9": (1280, 720),
+                    "3:4": (864, 1152),
+                    "9:16": (720, 1280),
+                    "3:2": (1248, 832),
+                    "2:3": (832, 1248),
+                    "21:9": (1512, 648)
+            }
         
         if aspect_ratio not in aspect_ratios:
             valid_ratios = ", ".join(aspect_ratios.keys())
             raise ValueError(f"Unsupported aspect ratio: {aspect_ratio}, please use one of: {valid_ratios}")
         
         width, height = aspect_ratios[aspect_ratio]
-        logger.info(f"Using aspect ratio {aspect_ratio}, calculated width={width}, height={height}")
-        
-        if width <= 0 or height <= 0 or width > CONFIG["image"]["max_width"] or height > CONFIG["image"]["max_height"]:
-            raise ValueError(
-                f"Width and height must be greater than 0 and not exceed {CONFIG['image']['max_width']}x{CONFIG['image']['max_height']}, "
-                f"current values: width={width}, height={height}"
-            )
+        logger.info(f"Using aspect ratio {aspect_ratio}, calculated size={width}x{height}")
             
         # Ensure filename has correct extension
         file_ext = Path(file_name).suffix.lower()
@@ -314,7 +358,8 @@ async def generate_image(prompt: str, file_name: str, save_folder: str, aspect_r
             file_name = f"{Path(file_name).stem}{CONFIG['output']['default_extension']}"
             
         # Generate image
-        image_data_list, error_message = await generator.generate(prompt, width, height)
+        size_str = f"{width}x{height}"
+        image_data_list, error_message = await generator.generate(prompt, size=size_str)
         if not image_data_list:
             if error_message:
                 raise Exception(f"Failed to generate image: {error_message}")
